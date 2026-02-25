@@ -472,6 +472,8 @@ function renderLicenseBadgeFilter(queryFilters) {
     selectedCode ? getOptionalLicenseTokens(selectedCode) : []
   );
   const requirements = getLicenseRequirementSummary(selectedLicenseSelection);
+  const isByActive =
+    selectedCode != null && normalizeLicenseCode(selectedCode) != null;
 
   const badgeItems = LICENSE_BADGES.map((badge) => {
     const nextTokens = new Set(selectedTokens);
@@ -544,7 +546,7 @@ function renderLicenseBadgeFilter(queryFilters) {
         <a
           href="${byHref}"
           class="license-picker__badge ${
-            selectedLicenseSelection === "by" ? "is-active" : ""
+            isByActive ? "is-active" : ""
           }"
           title="${escapeHtml(BY_BADGE_TOOLTIP)}"
         >
