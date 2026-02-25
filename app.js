@@ -51,7 +51,6 @@ const BRAND = {
     "Find Creative Commons music fast. Filter by tag and license terms, then open albums on Bandcamp.",
   navDiscover: "Discover by Tag",
   navResults: "Results",
-  navAdvanced: "Advanced Filters",
 };
 
 const LICENSE_TERM_LEGEND = [
@@ -86,7 +85,7 @@ const VERY_LOW_COUNT = 10;
 const LANDING_COUNT = 10;
 const SAMPLE_COUNT = 5;
 const URL_CAP = 10;
-const ROUTES = new Set(["/", "/list", "/advanced"]);
+const ROUTES = new Set(["/", "/list"]);
 
 const licenseById = new Map(LICENSES.map((license) => [license.bc_id, license]));
 const licenseByName = new Map(
@@ -94,15 +93,6 @@ const licenseByName = new Map(
 );
 
 const appEl = document.getElementById("app");
-
-const baseAdvancedFilters = {
-  includeTags: "",
-  excludeTags: "",
-  includeString: "",
-  excludeString: "",
-  includeLicense: "",
-  capUrlsPerAccount: false,
-};
 
 const state = {
   loadingTags: "not-started",
@@ -126,15 +116,18 @@ const state = {
 
   listShowAll: false,
   listLicenseSelection: DEFAULT_RESULTS_LICENSE_SELECTION,
+  listTextSearch: "",
+  debouncedListTextSearch: "",
+  listTextSearchTimer: null,
+  listSelectedTagIds: [],
+  listTagSearchInput: "",
+  listTagSuggestions: [],
+  listTagSuggestionsVisible: false,
+  listCapPerArtist: false,
+
   listCache: {
     key: "",
     shuffled: [],
-  },
-
-  advanced: {
-    inputs: { ...baseAdvancedFilters },
-    filters: { ...baseAdvancedFilters },
-    showAll: false,
   },
 };
 
@@ -146,6 +139,7 @@ function init() {
   appEl.addEventListener("click", handleAppClick);
   appEl.addEventListener("submit", handleAppSubmit);
   appEl.addEventListener("input", handleAppInput);
+  document.addEventListener("click", handleDocumentClick);
   window.addEventListener("hashchange", onRouteChange);
 
   onRouteChange();
@@ -161,9 +155,19 @@ function onRouteChange() {
     if (explicitSelection) {
       state.listLicenseSelection = explicitSelection;
     }
+
+    const tagParam = parseMaybeNumber(state.route.query.get("tag"));
+    if (tagParam != null && !state.listSelectedTagIds.includes(tagParam)) {
+      state.listSelectedTagIds = [tagParam];
+    }
   }
 
   state.listShowAll = false;
+  state.listTextSearch = "";
+  state.debouncedListTextSearch = "";
+  state.listTagSearchInput = "";
+  state.listTagSuggestions = [];
+  state.listTagSuggestionsVisible = false;
   window.scrollTo(0, 0);
   render();
 }
@@ -291,7 +295,6 @@ function render() {
     state.loadingUrls !== "loaded" || collapseUrls(queryFilteredUrls).length === 0;
 
   const listHref = buildRoute("/list", state.route.query);
-  const advancedHref = buildRoute("/advanced", state.route.query);
 
   appEl.innerHTML = `
     <div class="app-shell">
@@ -313,9 +316,6 @@ function render() {
             <a href="${listHref}" class="hero__nav-link ${
               state.route.path === "/list" ? "is-active" : ""
             }">${BRAND.navResults}</a>
-            <a href="${advancedHref}" class="hero__nav-link ${
-              state.route.path === "/advanced" ? "is-active" : ""
-            }">${BRAND.navAdvanced}</a>
           </nav>
 
           <button
@@ -344,11 +344,7 @@ function renderRouteContent(queryFilters, queryFilteredUrls) {
     return renderTagExplorer();
   }
 
-  if (state.route.path === "/list") {
-    return renderAlbumList(queryFilters, queryFilteredUrls);
-  }
-
-  return renderAdvancedLab(queryFilteredUrls);
+  return renderAlbumList(queryFilters, queryFilteredUrls);
 }
 
 function renderLicenseLegend() {
@@ -570,7 +566,14 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
     return `<p class="status status--loading">Loading albums...</p>`;
   }
 
-  const shuffledUrls = getShuffledUrls(queryFilteredUrls, queryFilters);
+  let listFiltered = queryFilteredUrls;
+  listFiltered = applyListTagFilter(listFiltered);
+  listFiltered = applyListTextSearch(listFiltered);
+  if (state.listCapPerArtist) {
+    listFiltered = collapseUrls(listFiltered, URL_CAP);
+  }
+
+  const shuffledUrls = getShuffledUrls(listFiltered, queryFilters);
   const displayedUrls = state.listShowAll
     ? shuffledUrls
     : shuffledUrls.slice(0, LANDING_COUNT);
@@ -607,9 +610,9 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
     `
     : "";
 
-  const hasResults = queryFilteredUrls.length > 0;
+  const hasResults = listFiltered.length > 0;
   const showAllButton =
-    !state.listShowAll && queryFilteredUrls.length > LANDING_COUNT
+    !state.listShowAll && listFiltered.length > LANDING_COUNT
       ? `<button class="ghost-button" data-action="show-all-list">Show all results</button>`
       : "";
 
@@ -623,7 +626,11 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
 
     ${renderLicenseBadgeFilter(queryFilters)}
 
-    <p class="result-meta"><strong>${formatCount(queryFilteredUrls.length)}</strong> matching albums</p>
+    ${renderListTextSearch()}
+    ${renderListTagFilter()}
+    ${renderListCapToggle()}
+
+    <p class="result-meta"><strong>${formatCount(listFiltered.length)}</strong> matching albums</p>
 
     ${selectedLicenseDetails}
     ${favoritesAbout}
@@ -702,134 +709,116 @@ function renderAlbumCard(urlListing, queryFilters) {
   `;
 }
 
-function renderAdvancedLab(baseFilteredUrls) {
-  if (state.loadingTags === "error" || state.loadingUrls === "error") {
-    return `<p class="status status--error">Advanced filters failed to initialize.</p>`;
-  }
-
-  if (state.loadingTags !== "loaded" || state.loadingUrls !== "loaded") {
-    return `<p class="status status--loading">Loading advanced filter data...</p>`;
-  }
-
-  const advancedFilteredUrls = filterUrlsAdvanced(baseFilteredUrls);
-  const displayedUrls = state.advanced.showAll
-    ? advancedFilteredUrls
-    : advancedFilteredUrls.slice(0, SAMPLE_COUNT);
-
-  const showAllButton =
-    !state.advanced.showAll && advancedFilteredUrls.length > SAMPLE_COUNT
-      ? `<button class="ghost-button" data-action="show-all-advanced">Show all results</button>`
-      : "";
-
+function renderListTextSearch() {
   return `
-    <div class="section-head">
-      <h2>${BRAND.navAdvanced}</h2>
-      <p>Compose precise filters using tags, text terms, and license codes.</p>
-    </div>
-
-    <div class="rules-card">
-      Enter terms in quotes, separated by commas.
-      <ul>
-        <li>Tags by name: <code>"indie","hip hop"</code></li>
-        <li>Strings match title + url: <code>"Boards","Canada"</code></li>
-        <li>License by abbreviation: <code>"by-nc-nd","by"</code></li>
-      </ul>
-    </div>
-
-    ${renderLicenseLegend()}
-
-    <form id="advanced-form" class="advanced-form">
+    <div class="list-filter-section">
       <label class="field-label">
-        Include tags (AND)
-        <input id="advanced-include-tags" type="text" value="${escapeHtml(
-          state.advanced.inputs.includeTags
-        )}" />
-      </label>
-
-      <label class="field-label">
-        Exclude tags (OR)
-        <input id="advanced-exclude-tags" type="text" value="${escapeHtml(
-          state.advanced.inputs.excludeTags
-        )}" />
-      </label>
-
-      <label class="field-label">
-        Include strings (AND)
-        <input id="advanced-include-string" type="text" value="${escapeHtml(
-          state.advanced.inputs.includeString
-        )}" />
-      </label>
-
-      <label class="field-label">
-        Exclude strings (OR)
-        <input id="advanced-exclude-string" type="text" value="${escapeHtml(
-          state.advanced.inputs.excludeString
-        )}" />
-      </label>
-
-      <label class="field-label">
-        Include license (OR)
-        <input id="advanced-include-license" type="text" value="${escapeHtml(
-          state.advanced.inputs.includeLicense
-        )}" />
-      </label>
-
-      <label class="checkbox-field">
+        Search by title or URL
         <input
-          id="advanced-cap-urls"
-          type="checkbox"
-          ${state.advanced.inputs.capUrlsPerAccount ? "checked" : ""}
+          id="list-text-search"
+          type="search"
+          value="${escapeHtml(state.listTextSearch)}"
+          placeholder="Search albums..."
         />
-        <span>Cap listings (${URL_CAP} per account)</span>
       </label>
-
-      <button class="solid-button" type="submit">Apply filters</button>
-    </form>
-
-    <button class="outline-button" data-action="random-advanced">Open random match</button>
-
-    <hr class="divider" />
-
-    <p class="result-meta"><strong>${formatCount(
-      advancedFilteredUrls.length
-    )}</strong> results</p>
-
-    ${
-      advancedFilteredUrls.length > 0
-        ? `<div class="advanced-card-grid">${displayedUrls
-            .map((urlListing) => renderAdvancedCard(urlListing))
-            .join("")}</div>`
-        : `<p class="status status--empty">No listings match the current advanced rules.</p>`
-    }
-
-    ${showAllButton}
+    </div>
   `;
 }
 
-function renderAdvancedCard(urlListing) {
-  const tagNames = (urlListing.tags || [])
-    .map((tagId) => state.tagById.get(tagId)?.name)
-    .filter(Boolean)
-    .join(", ");
+function renderListTagFilter() {
+  const selectedBadges = state.listSelectedTagIds
+    .map((tagId) => {
+      const tag = state.tagById.get(tagId);
+      if (!tag) return "";
+      return `
+        <span class="filter-tag-badge">
+          ${escapeHtml(tag.name)}
+          <button
+            class="filter-tag-badge__remove"
+            data-action="remove-list-tag"
+            data-tag-id="${tagId}"
+            aria-label="Remove ${escapeHtml(tag.name)}"
+          >&times;</button>
+        </span>
+      `;
+    })
+    .join("");
+
+  const suggestions = state.listTagSuggestionsVisible
+    ? `
+      <ul class="tag-autocomplete__list">
+        ${state.listTagSuggestions
+          .map(
+            (tag) => `
+            <li
+              class="tag-autocomplete__option"
+              data-action="select-list-tag"
+              data-tag-id="${tag.tag_id}"
+            >
+              ${escapeHtml(tag.name)}
+              <span class="tag-autocomplete__count">${formatCount(tag.count)}</span>
+            </li>
+          `
+          )
+          .join("")}
+        ${state.listTagSuggestions.length === 0 ? `<li class="tag-autocomplete__option tag-autocomplete__option--empty">No matching tags</li>` : ""}
+      </ul>
+    `
+    : "";
 
   return `
-    <article class="advanced-card">
-      <ul>
-        <li><strong>Title:</strong> ${escapeHtml(urlListing.title)}</li>
-        <li>
-          <strong>URL:</strong>
-          <a href="${escapeHtml(urlListing.url)}" target="_blank" rel="noreferrer">${escapeHtml(
-            urlListing.url
-          )}</a>
-        </li>
-        <li><strong>Tags:</strong> ${escapeHtml(tagNames || "none")}</li>
-        <li>
-          <strong>License:</strong>
-          ${escapeHtml(getLicenseNameById(urlListing.license) || "unknown")}
-        </li>
-      </ul>
-    </article>
+    <div class="list-filter-section tag-autocomplete">
+      <label class="field-label">
+        Filter by tags
+        <input
+          id="list-tag-search"
+          type="search"
+          value="${escapeHtml(state.listTagSearchInput)}"
+          placeholder="Type to search tags..."
+          autocomplete="off"
+        />
+      </label>
+      ${suggestions}
+      ${selectedBadges ? `<div class="filter-tag-badges">${selectedBadges}</div>` : ""}
+    </div>
   `;
+}
+
+function renderListCapToggle() {
+  return `
+    <div class="list-filter-section">
+      <label class="checkbox-field">
+        <input
+          id="list-cap-toggle"
+          type="checkbox"
+          ${state.listCapPerArtist ? "checked" : ""}
+        />
+        <span>Limit to ${URL_CAP} albums per artist</span>
+      </label>
+      <p class="cap-toggle-hint">Some Bandcamp accounts have many releases. Enable this to see a wider variety of artists.</p>
+    </div>
+  `;
+}
+
+function applyListTagFilter(urls) {
+  if (state.listSelectedTagIds.length === 0) return urls;
+
+  return urls.filter((urlListing) => {
+    const tags = urlListing.tags || [];
+    return state.listSelectedTagIds.every((tagId) => tags.includes(tagId));
+  });
+}
+
+function applyListTextSearch(urls) {
+  const query = state.debouncedListTextSearch.toLowerCase();
+  if (!query) return urls;
+
+  return urls.filter((urlListing) => {
+    return (
+      String(urlListing.title || "").toLowerCase().includes(query) ||
+      String(urlListing.url || "").toLowerCase().includes(query)
+    );
+  });
 }
 
 function renderFooter() {
@@ -868,6 +857,17 @@ function renderPlayer() {
       </iframe>
     </div>
   `;
+}
+
+function handleDocumentClick(event) {
+  if (state.listTagSuggestionsVisible) {
+    const autocomplete = document.querySelector(".tag-autocomplete");
+    if (autocomplete && !autocomplete.contains(event.target)) {
+      state.listTagSuggestionsVisible = false;
+      state.listTagSuggestions = [];
+      render();
+    }
+  }
 }
 
 function handleAppClick(event) {
@@ -919,16 +919,35 @@ function handleAppClick(event) {
     return;
   }
 
-  if (action === "random-advanced") {
+  if (action === "select-list-tag") {
     event.preventDefault();
-    handleRandomAdvanced();
+    const tagId = Number(actionEl.dataset.tagId);
+    if (Number.isFinite(tagId) && !state.listSelectedTagIds.includes(tagId)) {
+      state.listSelectedTagIds = [...state.listSelectedTagIds, tagId];
+      state.listTagSearchInput = "";
+      state.listTagSuggestions = [];
+      state.listTagSuggestionsVisible = false;
+      state.listCache.key = "";
+      state.listShowAll = false;
+      render();
+      const input = document.getElementById("list-tag-search");
+      if (input) input.focus();
+    }
     return;
   }
 
-  if (action === "show-all-advanced") {
+  if (action === "remove-list-tag") {
     event.preventDefault();
-    state.advanced.showAll = true;
-    render();
+    const tagId = Number(actionEl.dataset.tagId);
+    if (Number.isFinite(tagId)) {
+      state.listSelectedTagIds = state.listSelectedTagIds.filter(
+        (id) => id !== tagId
+      );
+      state.listCache.key = "";
+      state.listShowAll = false;
+      render();
+    }
+    return;
   }
 }
 
@@ -944,12 +963,6 @@ function handleAppSubmit(event) {
     return;
   }
 
-  if (form.id === "advanced-form") {
-    event.preventDefault();
-    state.advanced.filters = { ...state.advanced.inputs };
-    state.advanced.showAll = false;
-    render();
-  }
 }
 
 function handleAppInput(event) {
@@ -980,33 +993,58 @@ function handleAppInput(event) {
     return;
   }
 
-  if (target.id === "advanced-include-tags") {
-    state.advanced.inputs.includeTags = target.value;
+  if (target.id === "list-text-search") {
+    state.listTextSearch = target.value;
+
+    if (state.listTextSearchTimer) {
+      clearTimeout(state.listTextSearchTimer);
+    }
+
+    state.listTextSearchTimer = setTimeout(() => {
+      state.debouncedListTextSearch = state.listTextSearch.trim();
+      state.listCache.key = "";
+      state.listShowAll = false;
+      render();
+      const input = document.getElementById("list-text-search");
+      if (input) input.focus();
+    }, 350);
+
     return;
   }
 
-  if (target.id === "advanced-exclude-tags") {
-    state.advanced.inputs.excludeTags = target.value;
+  if (target.id === "list-tag-search") {
+    state.listTagSearchInput = target.value;
+    const query = target.value.trim().toLowerCase();
+
+    if (query) {
+      const excluded = new Set(state.listSelectedTagIds);
+      state.listTagSuggestions = state.tags
+        .filter(
+          (tag) =>
+            !excluded.has(tag.tag_id) &&
+            String(tag.name || "").toLowerCase().includes(query)
+        )
+        .slice(0, 10);
+      state.listTagSuggestionsVisible = true;
+    } else {
+      state.listTagSuggestions = [];
+      state.listTagSuggestionsVisible = false;
+    }
+
+    render();
+    const input = document.getElementById("list-tag-search");
+    if (input) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
     return;
   }
 
-  if (target.id === "advanced-include-string") {
-    state.advanced.inputs.includeString = target.value;
-    return;
-  }
-
-  if (target.id === "advanced-exclude-string") {
-    state.advanced.inputs.excludeString = target.value;
-    return;
-  }
-
-  if (target.id === "advanced-include-license") {
-    state.advanced.inputs.includeLicense = target.value;
-    return;
-  }
-
-  if (target.id === "advanced-cap-urls") {
-    state.advanced.inputs.capUrlsPerAccount = target.checked;
+  if (target.id === "list-cap-toggle") {
+    state.listCapPerArtist = target.checked;
+    state.listCache.key = "";
+    state.listShowAll = false;
+    render();
   }
 }
 
@@ -1014,17 +1052,17 @@ function handleRandomGlobal() {
   if (state.loadingUrls !== "loaded") return;
 
   const queryFilters = getQueryFilters(state.route.query);
-  const queryFilteredUrls = filterUrlsByQuery(state.urls, queryFilters);
-  openRandomUrl(collapseUrls(queryFilteredUrls));
-}
+  let filtered = filterUrlsByQuery(state.urls, queryFilters);
 
-function handleRandomAdvanced() {
-  if (state.loadingUrls !== "loaded") return;
+  if (state.route.path === "/list") {
+    filtered = applyListTagFilter(filtered);
+    filtered = applyListTextSearch(filtered);
+    if (state.listCapPerArtist) {
+      filtered = collapseUrls(filtered, URL_CAP);
+    }
+  }
 
-  const queryFilters = getQueryFilters(state.route.query);
-  const queryFilteredUrls = filterUrlsByQuery(state.urls, queryFilters);
-  const advancedFilteredUrls = filterUrlsAdvanced(queryFilteredUrls);
-  openRandomUrl(collapseUrls(advancedFilteredUrls));
+  openRandomUrl(collapseUrls(filtered));
 }
 
 function openRandomUrl(urls) {
@@ -1199,7 +1237,7 @@ function filterUrlsByQuery(urls, queryFilters) {
 
 function getShuffledUrls(filteredUrls, queryFilters) {
   const licenseSelection = queryFilters?.selectedLicenseSelection || "";
-  const key = `${state.route.path}?${state.route.query.toString()}&__lic=${licenseSelection}`;
+  const key = `${state.route.path}?${state.route.query.toString()}&__lic=${licenseSelection}&__txt=${state.debouncedListTextSearch}&__tags=${state.listSelectedTagIds.join(",")}&__cap=${state.listCapPerArtist}`;
 
   if (state.listCache.key !== key) {
     state.listCache.key = key;
@@ -1265,111 +1303,6 @@ function collapseUrls(urls, limit = 5) {
 
     return counts[subdomain] <= limit;
   });
-}
-
-function filterUrlsAdvanced(urls) {
-  const filters = state.advanced.filters;
-
-  if (
-    !filters.includeTags &&
-    !filters.excludeTags &&
-    !filters.includeString &&
-    !filters.excludeString &&
-    !filters.includeLicense &&
-    !filters.capUrlsPerAccount
-  ) {
-    return urls;
-  }
-
-  let prefilteredUrls = urls;
-
-  if (filters.capUrlsPerAccount) {
-    const byOriginCount = new Map();
-    const cappedUrls = [];
-
-    for (const urlListing of urls) {
-      let origin;
-      try {
-        origin = new URL(urlListing.url).origin;
-      } catch {
-        continue;
-      }
-
-      const count = byOriginCount.get(origin) || 0;
-      if (count < URL_CAP) {
-        byOriginCount.set(origin, count + 1);
-        cappedUrls.push(urlListing);
-      }
-    }
-
-    prefilteredUrls = cappedUrls;
-  }
-
-  return prefilteredUrls.filter((urlListing) => {
-    if (filters.includeLicense) {
-      const terms = splitTerms(filters.includeLicense);
-      const ids = terms
-        .map((term) => licenseByName.get(term)?.bc_id)
-        .filter((id) => id != null);
-
-      if (!ids.includes(urlListing.license)) {
-        return false;
-      }
-    }
-
-    if (filters.includeString) {
-      const terms = splitTerms(filters.includeString);
-      for (const term of terms) {
-        if (
-          !String(urlListing.title || "").toLowerCase().includes(term) &&
-          !String(urlListing.url || "").toLowerCase().includes(term)
-        ) {
-          return false;
-        }
-      }
-    }
-
-    if (filters.excludeString) {
-      const terms = splitTerms(filters.excludeString);
-      for (const term of terms) {
-        if (
-          String(urlListing.title || "").toLowerCase().includes(term) ||
-          String(urlListing.url || "").toLowerCase().includes(term)
-        ) {
-          return false;
-        }
-      }
-    }
-
-    if (filters.includeTags) {
-      const terms = splitTerms(filters.includeTags);
-      for (const term of terms) {
-        const tag = state.tagByName.get(term);
-        if (tag && !(urlListing.tags || []).includes(tag.tag_id)) {
-          return false;
-        }
-      }
-    }
-
-    if (filters.excludeTags) {
-      const terms = splitTerms(filters.excludeTags);
-      for (const term of terms) {
-        const tag = state.tagByName.get(term);
-        if (tag && (urlListing.tags || []).includes(tag.tag_id)) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  });
-}
-
-function splitTerms(input) {
-  return String(input)
-    .split(/\s*,\s*/)
-    .map((token) => token.replace(/(^"|"$)/g, "").toLowerCase())
-    .filter(Boolean);
 }
 
 function getLicenseNameById(licenseId) {
