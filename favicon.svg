@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Rainbow quarter note favicon">
+  <defs>
+    <linearGradient id="note-rainbow" x1="10" y1="10" x2="54" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff3b30" />
+      <stop offset="0.17" stop-color="#ff9500" />
+      <stop offset="0.34" stop-color="#ffcc00" />
+      <stop offset="0.51" stop-color="#34c759" />
+      <stop offset="0.68" stop-color="#0a84ff" />
+      <stop offset="0.85" stop-color="#5e5ce6" />
+      <stop offset="1" stop-color="#bf5af2" />
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="#ffffff" stroke="#d6dde6" stroke-width="2" />
+  <rect x="33" y="10" width="8" height="34" rx="4" fill="url(#note-rainbow)" />
+  <ellipse cx="25" cy="45" rx="12" ry="10" transform="rotate(-22 25 45)" fill="url(#note-rainbow)" />
+</svg>
