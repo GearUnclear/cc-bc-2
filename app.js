@@ -61,6 +61,24 @@ const LICENSE_TERM_LEGEND = [
   { code: "nd", meaning: "no derivatives" },
 ];
 
+const LICENSE_BADGE_ORDER = ["nc", "sa", "nd"];
+const LICENSE_BADGES = [
+  { token: "nc", label: "NC", requirement: "No commercial use." },
+  {
+    token: "sa",
+    label: "SA",
+    requirement: "Derivatives must be shared under the same license.",
+  },
+  { token: "nd", label: "ND", requirement: "No derivative works allowed." },
+];
+const LICENSE_BADGE_HINT =
+  "SA and ND cannot be combined in a standard Creative Commons license.";
+const LOCKED_BY_TOOLTIP =
+  "Attribution is required for all standard Creative Commons licenses.";
+const STANDARD_LICENSE_CODES = new Set(
+  LICENSES.map((license) => license.name.toLowerCase())
+);
+
 const LOW_COUNT = 200;
 const VERY_LOW_COUNT = 10;
 const LANDING_COUNT = 10;
@@ -432,6 +450,80 @@ function renderTagExplorer() {
   `;
 }
 
+function renderLicenseBadgeFilter(queryFilters) {
+  const selectedTokens = new Set(
+    getOptionalLicenseTokens(queryFilters.selectedLicenseCode)
+  );
+  const selectedCode = queryFilters.selectedLicenseCode || "";
+  const requirements = getLicenseRequirementSummary(selectedCode);
+
+  const badgeItems = LICENSE_BADGES.map((badge) => {
+    const nextTokens = new Set(selectedTokens);
+
+    if (nextTokens.has(badge.token)) {
+      nextTokens.delete(badge.token);
+    } else {
+      nextTokens.add(badge.token);
+    }
+
+    const nextCode = composeLicenseCodeFromOptionalTokens(nextTokens);
+    const isActive = selectedTokens.has(badge.token);
+
+    if (!nextCode) {
+      return `
+        <span
+          class="license-picker__badge is-disabled"
+          aria-disabled="true"
+          title="${escapeHtml(LICENSE_BADGE_HINT)}"
+        >
+          ${escapeHtml(badge.label)}
+        </span>
+      `;
+    }
+
+    const href = buildListRouteWithQueryPatch(state.route.query, {
+      lic: nextTokens.size > 0 ? nextCode : null,
+      license: null,
+    });
+
+    return `
+      <a
+        href="${href}"
+        class="license-picker__badge ${isActive ? "is-active" : ""}"
+        title="${escapeHtml(badge.requirement)}"
+      >
+        ${escapeHtml(badge.label)}
+      </a>
+    `;
+  }).join("");
+
+  const codeDisplay = selectedCode
+    ? `<code>${escapeHtml(selectedCode)}</code>`
+    : `<code>any by-*</code>`;
+
+  return `
+    <section class="license-picker" aria-label="License badge filter">
+      <p class="license-picker__intro">
+        Build an exact license filter. <strong>BY</strong> stays on.
+      </p>
+      <div class="license-picker__row">
+        <span
+          class="license-picker__badge license-picker__badge--locked is-active"
+          aria-label="BY badge is always enabled"
+          tabindex="0"
+          title="${escapeHtml(LOCKED_BY_TOOLTIP)}"
+        >
+          BY
+        </span>
+        ${badgeItems}
+      </div>
+      <p class="license-picker__requirements">${escapeHtml(requirements)}</p>
+      <p class="license-picker__code">Current code: ${codeDisplay}</p>
+      <p class="license-picker__hint">${escapeHtml(LICENSE_BADGE_HINT)}</p>
+    </section>
+  `;
+}
+
 function renderAlbumList(queryFilters, queryFilteredUrls) {
   if (state.loadingTags === "error" || state.loadingUrls === "error") {
     return `<p class="status status--error">Album index failed to load.</p>`;
@@ -491,6 +583,8 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
       <h2>${BRAND.navResults}</h2>
       <p>Matches from your current filters, shuffled for discovery.</p>
     </div>
+
+    ${renderLicenseBadgeFilter(queryFilters)}
 
     <p class="result-meta"><strong>${formatCount(queryFilteredUrls.length)}</strong> matching albums</p>
 
@@ -902,12 +996,104 @@ function openRandomUrl(urls) {
   window.open(listing.url, "_blank", "noopener");
 }
 
+function normalizeLicenseCode(value) {
+  if (value == null) return null;
+
+  const tokens = String(value)
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .split("-")
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0 || tokens[0] !== "by") {
+    return null;
+  }
+
+  const seen = new Set();
+  for (const token of tokens.slice(1)) {
+    if (!LICENSE_BADGE_ORDER.includes(token) || seen.has(token)) {
+      return null;
+    }
+    seen.add(token);
+  }
+
+  const canonicalCode = [
+    "by",
+    ...LICENSE_BADGE_ORDER.filter((token) => seen.has(token)),
+  ].join("-");
+
+  if (!STANDARD_LICENSE_CODES.has(canonicalCode)) {
+    return null;
+  }
+
+  return canonicalCode;
+}
+
+function getOptionalLicenseTokens(licenseCode) {
+  const normalizedCode = normalizeLicenseCode(licenseCode);
+  if (!normalizedCode) return [];
+
+  return normalizedCode
+    .split("-")
+    .slice(1)
+    .filter((token) => LICENSE_BADGE_ORDER.includes(token));
+}
+
+function composeLicenseCodeFromOptionalTokens(optionalTokens) {
+  const selectedTokens = new Set(optionalTokens);
+  const candidate = [
+    "by",
+    ...LICENSE_BADGE_ORDER.filter((token) => selectedTokens.has(token)),
+  ].join("-");
+
+  return normalizeLicenseCode(candidate);
+}
+
+function getLicenseRequirementSummary(selectedLicenseCode) {
+  const normalizedCode = normalizeLicenseCode(selectedLicenseCode);
+  const optionalTokens = getOptionalLicenseTokens(selectedLicenseCode);
+  const baseTokenList =
+    optionalTokens.length > 0 ? ["by", ...optionalTokens] : ["by"];
+  const details = baseTokenList
+    .map((token) => LICENSE_EXPLANATIONS[token] || token)
+    .join("; ");
+
+  const sentence = details.charAt(0).toUpperCase() + details.slice(1);
+  if (optionalTokens.length === 0) {
+    if (normalizedCode === "by") {
+      return `${sentence}.`;
+    }
+    return `${sentence}. Add NC, SA, or ND to narrow results.`;
+  }
+
+  return `${sentence}.`;
+}
+
 function getQueryFilters(query) {
-  const selectedLicense = parseMaybeNumber(query.get("license"));
+  const selectedLicenseCodeFromRoute = normalizeLicenseCode(query.get("lic"));
+  let selectedLicense = null;
+  let selectedLicenseCode = null;
+
+  if (selectedLicenseCodeFromRoute) {
+    if (selectedLicenseCodeFromRoute !== "by") {
+      selectedLicenseCode = selectedLicenseCodeFromRoute;
+      selectedLicense =
+        licenseByName.get(selectedLicenseCodeFromRoute)?.bc_id ?? null;
+    }
+  } else {
+    const legacyLicense = parseMaybeNumber(query.get("license"));
+    if (legacyLicense != null && licenseById.has(legacyLicense)) {
+      selectedLicense = legacyLicense;
+      selectedLicenseCode = normalizeLicenseCode(getLicenseNameById(legacyLicense));
+    }
+  }
+
   const selectedTag = parseMaybeNumber(query.get("tag"));
   const showingFaves = query.has("faves");
 
   return {
+    selectedLicenseCode,
     selectedLicense,
     selectedTag,
     showingFaves,
@@ -1128,6 +1314,21 @@ function getLicenseDetails(licenseId) {
     const explanation = LICENSE_EXPLANATIONS[token] || "custom term";
     return `${token}: ${explanation}`;
   });
+}
+
+function buildListRouteWithQueryPatch(baseQuery, patch) {
+  const nextQuery = new URLSearchParams(baseQuery);
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (value == null || value === false || value === "") {
+      nextQuery.delete(key);
+      continue;
+    }
+
+    nextQuery.set(key, String(value));
+  }
+
+  return buildRoute("/list", nextQuery);
 }
 
 function buildRoute(path, params) {

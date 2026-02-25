@@ -418,6 +418,92 @@ a {
   font-family: "Space Mono", monospace;
 }
 
+.license-picker {
+  margin-top: 16px;
+  border-radius: 14px;
+  border: 1px solid #d7e3ec;
+  background: rgba(245, 250, 255, 0.96);
+  padding: 12px;
+}
+
+.license-picker__intro,
+.license-picker__requirements,
+.license-picker__code,
+.license-picker__hint {
+  margin: 0;
+  font-size: 0.91rem;
+  color: #335064;
+}
+
+.license-picker__row {
+  margin: 10px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.license-picker__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  text-decoration: none;
+  border-radius: 999px;
+  border: 1px solid #c0d3e0;
+  background: #fff;
+  color: #1e495f;
+  font-family: "Space Mono", monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+.license-picker__badge.is-active {
+  border-color: #1e495f;
+  background: #1e495f;
+  color: #fff;
+}
+
+.license-picker__badge.is-disabled {
+  border-color: #d5dfe8;
+  background: #edf3f8;
+  color: #7b8f9e;
+  cursor: not-allowed;
+}
+
+.license-picker__badge--locked {
+  cursor: help;
+  border-style: dashed;
+}
+
+.license-picker__badge:focus-visible {
+  outline: 2px solid rgba(15, 125, 155, 0.35);
+  outline-offset: 1px;
+}
+
+.license-picker__requirements {
+  margin-top: 2px;
+}
+
+.license-picker__code {
+  margin-top: 6px;
+}
+
+.license-picker__code code {
+  border-radius: 6px;
+  border: 1px solid #c8d9e5;
+  background: #edf6fd;
+  color: #204863;
+  padding: 1px 5px;
+  font-family: "Space Mono", monospace;
+  font-size: 0.83em;
+}
+
+.license-picker__hint {
+  margin-top: 6px;
+  color: #5b6f7f;
+}
+
 .info-card {
   margin-top: 14px;
   border-radius: 14px;
