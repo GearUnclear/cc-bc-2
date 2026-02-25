@@ -73,8 +73,10 @@ const LICENSE_BADGES = [
 ];
 const LICENSE_BADGE_HINT =
   "SA and ND cannot be combined in a standard Creative Commons license.";
-const LOCKED_BY_TOOLTIP =
+const BY_BADGE_TOOLTIP =
   "Attribution is required for all standard Creative Commons licenses.";
+const ALL_LICENSE_SELECTION = "all";
+const DEFAULT_RESULTS_LICENSE_SELECTION = ALL_LICENSE_SELECTION;
 const STANDARD_LICENSE_CODES = new Set(
   LICENSES.map((license) => license.name.toLowerCase())
 );
@@ -123,6 +125,7 @@ const state = {
   tagDebounceTimer: null,
 
   listShowAll: false,
+  listLicenseSelection: DEFAULT_RESULTS_LICENSE_SELECTION,
   listCache: {
     key: "",
     shuffled: [],
@@ -152,6 +155,14 @@ function init() {
 
 function onRouteChange() {
   state.route = parseRoute();
+
+  if (state.route.path === "/list") {
+    const explicitSelection = getLicenseSelectionFromQuery(state.route.query);
+    if (explicitSelection) {
+      state.listLicenseSelection = explicitSelection;
+    }
+  }
+
   state.listShowAll = false;
   window.scrollTo(0, 0);
   render();
@@ -393,7 +404,7 @@ function renderTagExplorer() {
   const licenseCards = LICENSES.map(
     (license) => `
       <a class="quick-card quick-card--license" href="${buildRoute("/list", {
-        license: license.bc_id,
+        lic: license.name,
       })}">
         <span>${escapeHtml(license.name)}</span>
         <small>${formatCount(license.count)}</small>
@@ -451,11 +462,16 @@ function renderTagExplorer() {
 }
 
 function renderLicenseBadgeFilter(queryFilters) {
+  const selectedLicenseSelection =
+    queryFilters.selectedLicenseSelection || DEFAULT_RESULTS_LICENSE_SELECTION;
+  const selectedCode =
+    selectedLicenseSelection === ALL_LICENSE_SELECTION
+      ? null
+      : selectedLicenseSelection;
   const selectedTokens = new Set(
-    getOptionalLicenseTokens(queryFilters.selectedLicenseCode)
+    selectedCode ? getOptionalLicenseTokens(selectedCode) : []
   );
-  const selectedCode = queryFilters.selectedLicenseCode || "";
-  const requirements = getLicenseRequirementSummary(selectedCode);
+  const requirements = getLicenseRequirementSummary(selectedLicenseSelection);
 
   const badgeItems = LICENSE_BADGES.map((badge) => {
     const nextTokens = new Set(selectedTokens);
@@ -482,7 +498,7 @@ function renderLicenseBadgeFilter(queryFilters) {
     }
 
     const href = buildListRouteWithQueryPatch(state.route.query, {
-      lic: nextTokens.size > 0 ? nextCode : null,
+      lic: nextCode,
       license: null,
     });
 
@@ -497,24 +513,43 @@ function renderLicenseBadgeFilter(queryFilters) {
     `;
   }).join("");
 
-  const codeDisplay = selectedCode
-    ? `<code>${escapeHtml(selectedCode)}</code>`
-    : `<code>any by-*</code>`;
+  const allHref = buildListRouteWithQueryPatch(state.route.query, {
+    lic: ALL_LICENSE_SELECTION,
+    license: null,
+  });
+  const byHref = buildListRouteWithQueryPatch(state.route.query, {
+    lic: "by",
+    license: null,
+  });
+  const codeDisplay =
+    selectedLicenseSelection === ALL_LICENSE_SELECTION
+      ? `<code>all</code>`
+      : `<code>${escapeHtml(selectedLicenseSelection)}</code>`;
 
   return `
     <section class="license-picker" aria-label="License badge filter">
       <p class="license-picker__intro">
-        Build an exact license filter. <strong>BY</strong> stays on.
+        Choose <strong>ALL</strong> or an exact Creative Commons license code.
       </p>
       <div class="license-picker__row">
-        <span
-          class="license-picker__badge license-picker__badge--locked is-active"
-          aria-label="BY badge is always enabled"
-          tabindex="0"
-          title="${escapeHtml(LOCKED_BY_TOOLTIP)}"
+        <a
+          href="${allHref}"
+          class="license-picker__badge ${
+            selectedLicenseSelection === ALL_LICENSE_SELECTION ? "is-active" : ""
+          }"
+          title="Show all Creative Commons licenses"
+        >
+          ALL
+        </a>
+        <a
+          href="${byHref}"
+          class="license-picker__badge ${
+            selectedLicenseSelection === "by" ? "is-active" : ""
+          }"
+          title="${escapeHtml(BY_BADGE_TOOLTIP)}"
         >
           BY
-        </span>
+        </a>
         ${badgeItems}
       </div>
       <p class="license-picker__requirements">${escapeHtml(requirements)}</p>
@@ -533,7 +568,7 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
     return `<p class="status status--loading">Loading albums...</p>`;
   }
 
-  const shuffledUrls = getShuffledUrls(queryFilteredUrls);
+  const shuffledUrls = getShuffledUrls(queryFilteredUrls, queryFilters);
   const displayedUrls = state.listShowAll
     ? shuffledUrls
     : shuffledUrls.slice(0, LANDING_COUNT);
@@ -622,6 +657,10 @@ function renderAlbumCard(urlListing, queryFilters) {
     .join("");
 
   const licenseName = getLicenseNameById(urlListing.license) || "unknown";
+  const normalizedLicenseCode = normalizeLicenseCode(licenseName);
+  const licenseHref = normalizedLicenseCode
+    ? buildRoute("/list", { lic: normalizedLicenseCode })
+    : buildRoute("/list", { license: urlListing.license });
   const licenseActiveClass =
     queryFilters.selectedLicense === urlListing.license ? "is-active" : "";
 
@@ -643,7 +682,7 @@ function renderAlbumCard(urlListing, queryFilters) {
 
       <div class="badge-row">
         <a
-          href="${buildRoute("/list", { license: urlListing.license })}"
+          href="${licenseHref}"
           class="badge badge--license ${licenseActiveClass}"
         >
           ${escapeHtml(licenseName)}
@@ -996,6 +1035,17 @@ function openRandomUrl(urls) {
   window.open(listing.url, "_blank", "noopener");
 }
 
+function normalizeLicenseSelection(value) {
+  if (value == null) return null;
+  const normalizedValue = String(value).trim().toLowerCase();
+  if (!normalizedValue) return null;
+  if (normalizedValue === ALL_LICENSE_SELECTION) {
+    return ALL_LICENSE_SELECTION;
+  }
+
+  return normalizeLicenseCode(normalizedValue);
+}
+
 function normalizeLicenseCode(value) {
   if (value == null) return null;
 
@@ -1030,6 +1080,20 @@ function normalizeLicenseCode(value) {
   return canonicalCode;
 }
 
+function getLicenseSelectionFromQuery(query) {
+  const selectedLicenseFromQuery = normalizeLicenseSelection(query.get("lic"));
+  if (selectedLicenseFromQuery) {
+    return selectedLicenseFromQuery;
+  }
+
+  const legacyLicense = parseMaybeNumber(query.get("license"));
+  if (legacyLicense != null && licenseById.has(legacyLicense)) {
+    return normalizeLicenseCode(getLicenseNameById(legacyLicense));
+  }
+
+  return null;
+}
+
 function getOptionalLicenseTokens(licenseCode) {
   const normalizedCode = normalizeLicenseCode(licenseCode);
   if (!normalizedCode) return [];
@@ -1050,49 +1114,52 @@ function composeLicenseCodeFromOptionalTokens(optionalTokens) {
   return normalizeLicenseCode(candidate);
 }
 
-function getLicenseRequirementSummary(selectedLicenseCode) {
-  const normalizedCode = normalizeLicenseCode(selectedLicenseCode);
-  const optionalTokens = getOptionalLicenseTokens(selectedLicenseCode);
-  const baseTokenList =
-    optionalTokens.length > 0 ? ["by", ...optionalTokens] : ["by"];
-  const details = baseTokenList
-    .map((token) => LICENSE_EXPLANATIONS[token] || token)
-    .join("; ");
-
-  const sentence = details.charAt(0).toUpperCase() + details.slice(1);
-  if (optionalTokens.length === 0) {
-    if (normalizedCode === "by") {
-      return `${sentence}.`;
-    }
-    return `${sentence}. Add NC, SA, or ND to narrow results.`;
+function getLicenseRequirementSummary(selectedLicenseSelection) {
+  if (
+    selectedLicenseSelection == null ||
+    selectedLicenseSelection === ALL_LICENSE_SELECTION
+  ) {
+    return "Showing all Creative Commons license types.";
   }
 
+  const normalizedCode = normalizeLicenseCode(selectedLicenseSelection);
+  if (!normalizedCode) {
+    return "Showing all Creative Commons license types.";
+  }
+
+  const details = normalizedCode
+    .split("-")
+    .map((token) => LICENSE_EXPLANATIONS[token] || token)
+    .join("; ");
+  const sentence = details.charAt(0).toUpperCase() + details.slice(1);
   return `${sentence}.`;
 }
 
-function getQueryFilters(query) {
-  const selectedLicenseCodeFromRoute = normalizeLicenseCode(query.get("lic"));
+function getQueryFilters(query, routePath = state.route.path) {
+  const explicitSelection = getLicenseSelectionFromQuery(query);
+  let selectedLicenseSelection = explicitSelection;
   let selectedLicense = null;
   let selectedLicenseCode = null;
 
-  if (selectedLicenseCodeFromRoute) {
-    if (selectedLicenseCodeFromRoute !== "by") {
-      selectedLicenseCode = selectedLicenseCodeFromRoute;
-      selectedLicense =
-        licenseByName.get(selectedLicenseCodeFromRoute)?.bc_id ?? null;
-    }
-  } else {
-    const legacyLicense = parseMaybeNumber(query.get("license"));
-    if (legacyLicense != null && licenseById.has(legacyLicense)) {
-      selectedLicense = legacyLicense;
-      selectedLicenseCode = normalizeLicenseCode(getLicenseNameById(legacyLicense));
-    }
+  if (!selectedLicenseSelection && routePath === "/list") {
+    selectedLicenseSelection =
+      state.listLicenseSelection || DEFAULT_RESULTS_LICENSE_SELECTION;
+  }
+
+  if (
+    selectedLicenseSelection &&
+    selectedLicenseSelection !== ALL_LICENSE_SELECTION
+  ) {
+    selectedLicenseCode = selectedLicenseSelection;
+    selectedLicense =
+      licenseByName.get(selectedLicenseSelection)?.bc_id ?? null;
   }
 
   const selectedTag = parseMaybeNumber(query.get("tag"));
   const showingFaves = query.has("faves");
 
   return {
+    selectedLicenseSelection,
     selectedLicenseCode,
     selectedLicense,
     selectedTag,
@@ -1128,8 +1195,9 @@ function filterUrlsByQuery(urls, queryFilters) {
   return filtered;
 }
 
-function getShuffledUrls(filteredUrls) {
-  const key = `${state.route.path}?${state.route.query.toString()}`;
+function getShuffledUrls(filteredUrls, queryFilters) {
+  const licenseSelection = queryFilters?.selectedLicenseSelection || "";
+  const key = `${state.route.path}?${state.route.query.toString()}&__lic=${licenseSelection}`;
 
   if (state.listCache.key !== key) {
     state.listCache.key = key;

@@ -471,11 +471,6 @@ a {
   cursor: not-allowed;
 }
 
-.license-picker__badge--locked {
-  cursor: help;
-  border-style: dashed;
-}
-
 .license-picker__badge:focus-visible {
   outline: 2px solid rgba(15, 125, 155, 0.35);
   outline-offset: 1px;
