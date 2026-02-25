@@ -725,6 +725,29 @@ function renderListTextSearch() {
   `;
 }
 
+function renderTagSuggestionsHTML() {
+  if (!state.listTagSuggestionsVisible) return "";
+  return `
+      <ul class="tag-autocomplete__list">
+        ${state.listTagSuggestions
+          .map(
+            (tag) => `
+            <li
+              class="tag-autocomplete__option"
+              data-action="select-list-tag"
+              data-tag-id="${tag.tag_id}"
+            >
+              ${escapeHtml(tag.name)}
+              <span class="tag-autocomplete__count">${formatCount(tag.count)}</span>
+            </li>
+          `
+          )
+          .join("")}
+        ${state.listTagSuggestions.length === 0 ? `<li class="tag-autocomplete__option tag-autocomplete__option--empty">No matching tags</li>` : ""}
+      </ul>
+    `;
+}
+
 function renderListTagFilter() {
   const selectedBadges = state.listSelectedTagIds
     .map((tagId) => {
@@ -744,27 +767,7 @@ function renderListTagFilter() {
     })
     .join("");
 
-  const suggestions = state.listTagSuggestionsVisible
-    ? `
-      <ul class="tag-autocomplete__list">
-        ${state.listTagSuggestions
-          .map(
-            (tag) => `
-            <li
-              class="tag-autocomplete__option"
-              data-action="select-list-tag"
-              data-tag-id="${tag.tag_id}"
-            >
-              ${escapeHtml(tag.name)}
-              <span class="tag-autocomplete__count">${formatCount(tag.count)}</span>
-            </li>
-          `
-          )
-          .join("")}
-        ${state.listTagSuggestions.length === 0 ? `<li class="tag-autocomplete__option tag-autocomplete__option--empty">No matching tags</li>` : ""}
-      </ul>
-    `
-    : "";
+  const suggestions = renderTagSuggestionsHTML();
 
   return `
     <div class="list-filter-section tag-autocomplete">
@@ -1031,11 +1034,14 @@ function handleAppInput(event) {
       state.listTagSuggestionsVisible = false;
     }
 
-    render();
-    const input = document.getElementById("list-tag-search");
-    if (input) {
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
+    const container = document.querySelector(".tag-autocomplete");
+    if (container) {
+      const oldList = container.querySelector(".tag-autocomplete__list");
+      if (oldList) oldList.remove();
+      const html = renderTagSuggestionsHTML();
+      if (html) {
+        container.querySelector("label").insertAdjacentHTML("afterend", html);
+      }
     }
     return;
   }
