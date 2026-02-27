@@ -678,7 +678,7 @@ a {
   left: 50%;
   transform: translateX(-50%);
   bottom: 8px;
-  width: min(980px, calc(100vw - 16px));
+  width: min(700px, calc(100vw - 16px));
   border: 1px solid rgba(24, 33, 43, 0.25);
   border-radius: 12px;
   overflow: hidden;
