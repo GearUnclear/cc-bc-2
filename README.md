@@ -29,6 +29,33 @@ This stamps hash-based `?v=` query params into `index.html` for `styles.css` and
 
 If you deploy by copying files directly (for example with `rsync` to `/var/www/...`), run `npm run version-assets` before syncing.
 
+## Dataset sync workflow
+
+Local favorites are managed in:
+
+- `config/favorites.bc_ids.json`
+
+To sync from upstream while preserving your favorites overlay:
+
+```bash
+npm run sync:urls
+npm run check:urls
+```
+
+`sync:urls` downloads upstream `urls.json`, reapplies your favorites by `bc_id`, and writes `public/urls.json`.
+
+`check:urls` validates:
+
+- no duplicate `url_id` values
+- all overlay `bc_id` values exist in `public/urls.json`
+- only overlay `bc_id` values are marked as favorites
+
+To verify whether `public/urls.json` would change without writing files:
+
+```bash
+npm run sync:urls:check
+```
+
 ## Deploy to live
 
 To sync this repo to `/var/www/music.wagenhoffer.dev`:

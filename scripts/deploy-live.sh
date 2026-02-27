@@ -88,6 +88,7 @@ run install -d "$TARGET_DIR/public"
 run install -m 0644 "$ROOT_DIR/index.html" "$TARGET_DIR/index.html"
 run install -m 0644 "$ROOT_DIR/app.js" "$TARGET_DIR/app.js"
 run install -m 0644 "$ROOT_DIR/styles.css" "$TARGET_DIR/styles.css"
+run install -m 0644 "$ROOT_DIR/favicon.svg" "$TARGET_DIR/favicon.svg"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   print_cmd "[dry-run]" rsync -a --delete "$ROOT_DIR/public/" "$TARGET_DIR/public/"

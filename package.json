@@ -7,6 +7,9 @@
     "version-assets": "node scripts/version-assets.js",
     "start": "npm run version-assets && node server.js",
     "dev": "npm run version-assets && node server.js",
+    "sync:urls": "node scripts/sync-upstream-urls.js",
+    "sync:urls:check": "node scripts/sync-upstream-urls.js --check",
+    "check:urls": "node scripts/check-urls-integrity.js",
     "deploy:live": "bash scripts/deploy-live.sh",
     "deploy:live:dry": "bash scripts/deploy-live.sh --dry-run"
   },
