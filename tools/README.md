@@ -18,6 +18,12 @@ Scripts for syncing and validating the URLs dataset with upstream.
   npm run check:urls
   ```
 
+- **generate-license-counts.js** - Build `public/license-counts.json` from `public/urls.json` for homepage license cards.
+  ```bash
+  npm run generate:license-counts
+  npm run generate:license-counts:check
+  ```
+
 ### `maintenance/`
 Scripts for maintaining dataset health, fixing missing data, and verifying dataset integrity.
 

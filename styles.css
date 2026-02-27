@@ -530,6 +530,11 @@ a {
   gap: 12px;
 }
 
+.list-load-sentinel {
+  height: 1px;
+  margin-top: 1px;
+}
+
 .album-card {
   position: relative;
   border: 1px solid #b8d2df;

@@ -3,37 +3,31 @@ const LICENSES = [
     name: "by-nc-nd",
     url: "http://creativecommons.org/licenses/by-nc-nd/3.0/",
     bc_id: 2,
-    count: 16691,
   },
   {
     name: "by-nc-sa",
     url: "http://creativecommons.org/licenses/by-nc-sa/3.0/",
     bc_id: 3,
-    count: 15674,
   },
   {
     name: "by-nc",
     url: "http://creativecommons.org/licenses/by-nc/3.0/",
     bc_id: 4,
-    count: 5894,
   },
   {
     name: "by-nd",
     url: "http://creativecommons.org/licenses/by-nd/3.0/",
     bc_id: 5,
-    count: 1319,
   },
   {
     name: "by-sa",
     url: "http://creativecommons.org/licenses/by-sa/3.0/",
     bc_id: 8,
-    count: 4044,
   },
   {
     name: "by",
     url: "http://creativecommons.org/licenses/by/3.0/",
     bc_id: 6,
-    count: 10498,
   },
 ];
 
@@ -82,7 +76,7 @@ const STANDARD_LICENSE_CODES = new Set(
 
 const LOW_COUNT = 200;
 const VERY_LOW_COUNT = 10;
-const LANDING_COUNT = 10;
+const LIST_BATCH_SIZE = 10;
 const SAMPLE_COUNT = 5;
 const URL_CAP = 10;
 const ROUTES = new Set(["/", "/list"]);
@@ -97,11 +91,14 @@ const appEl = document.getElementById("app");
 const state = {
   loadingTags: "not-started",
   loadingUrls: "not-started",
+  loadingLicenseCounts: "not-started",
   tags: [],
   urls: [],
   tagById: new Map(),
   tagByName: new Map(),
   urlById: new Map(),
+  licenseCountsById: new Map(),
+  urlLicenseCountsById: new Map(),
   playerData: null,
 
   route: {
@@ -114,7 +111,7 @@ const state = {
   filterLowCount: "top",
   tagDebounceTimer: null,
 
-  listShowAll: false,
+  listVisibleCount: LIST_BATCH_SIZE,
   listLicenseSelection: DEFAULT_RESULTS_LICENSE_SELECTION,
   listTextSearch: "",
   debouncedListTextSearch: "",
@@ -129,6 +126,8 @@ const state = {
     key: "",
     shuffled: [],
   },
+  listObserver: null,
+  hasRenderedShell: false,
 };
 
 init();
@@ -144,6 +143,7 @@ function init() {
 
   onRouteChange();
   loadTags();
+  loadLicenseCounts();
   loadUrls();
 }
 
@@ -162,7 +162,7 @@ function onRouteChange() {
     }
   }
 
-  state.listShowAll = false;
+  resetListPagination();
   state.listTextSearch = "";
   state.debouncedListTextSearch = "";
   state.listTagSearchInput = "";
@@ -231,14 +231,54 @@ async function loadUrls() {
     state.urls = Array.isArray(urlData) ? urlData : [];
 
     state.urlById.clear();
+    state.urlLicenseCountsById.clear();
     for (const listing of state.urls) {
       state.urlById.set(listing.url_id, listing);
+
+      const licenseId = Number(listing.license);
+      if (Number.isFinite(licenseId)) {
+        const nextCount = (state.urlLicenseCountsById.get(licenseId) || 0) + 1;
+        state.urlLicenseCountsById.set(licenseId, nextCount);
+      }
     }
 
     state.loadingUrls = "loaded";
   } catch (error) {
     console.error("Failed to load urls", error);
     state.loadingUrls = "error";
+  }
+
+  render();
+}
+
+async function loadLicenseCounts() {
+  if (state.loadingLicenseCounts !== "not-started") return;
+
+  state.loadingLicenseCounts = "loading";
+  render();
+
+  try {
+    const countsData = await fetchDataJson("license-counts.json");
+    const byBcId =
+      countsData &&
+      typeof countsData === "object" &&
+      countsData.by_bc_id &&
+      typeof countsData.by_bc_id === "object"
+        ? countsData.by_bc_id
+        : {};
+
+    state.licenseCountsById.clear();
+    for (const [bcIdValue, countValue] of Object.entries(byBcId)) {
+      const bcId = Number(bcIdValue);
+      const count = Number(countValue);
+      if (!Number.isFinite(bcId) || !Number.isFinite(count)) continue;
+      state.licenseCountsById.set(bcId, Math.max(0, Math.floor(count)));
+    }
+
+    state.loadingLicenseCounts = "loaded";
+  } catch (error) {
+    console.warn("Failed to load license counts", error);
+    state.loadingLicenseCounts = "error";
   }
 
   render();
@@ -283,6 +323,13 @@ function getDataPaths(fileName) {
 
 function render() {
   if (!appEl) return;
+  const focusSnapshot = captureFocusedInputState();
+  teardownListObserver();
+
+  const heroClass = state.hasRenderedShell ? "hero" : "hero animate-enter";
+  const panelClass = state.hasRenderedShell
+    ? "panel"
+    : "panel animate-enter animate-enter--delay";
 
   const queryFilters = getQueryFilters(state.route.query);
   const queryFilteredUrls =
@@ -299,7 +346,7 @@ function render() {
   appEl.innerHTML = `
     <div class="app-shell">
       <main class="layout">
-        <header class="hero animate-enter">
+        <header class="${heroClass}">
           <a href="#/" class="hero__logo">${BRAND.appName}</a>
           <p class="hero__byline">${BRAND.byline}</p>
           <p class="hero__subtitle">${BRAND.subtitle}</p>
@@ -327,7 +374,7 @@ function render() {
           </button>
         </header>
 
-        <section class="panel animate-enter animate-enter--delay">
+        <section class="${panelClass}">
           ${renderRouteContent(queryFilters, queryFilteredUrls)}
         </section>
 
@@ -337,6 +384,70 @@ function render() {
       ${renderPlayer()}
     </div>
   `;
+
+  state.hasRenderedShell = true;
+  restoreFocusedInputState(focusSnapshot);
+  syncListAutoLoad();
+}
+
+function captureFocusedInputState() {
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof HTMLElement) || !appEl?.contains(activeElement)) {
+    return null;
+  }
+
+  const isRestorableField =
+    activeElement instanceof HTMLInputElement ||
+    activeElement instanceof HTMLTextAreaElement ||
+    activeElement instanceof HTMLSelectElement;
+
+  if (!isRestorableField || !activeElement.id) return null;
+
+  const snapshot = { id: activeElement.id };
+  if (
+    activeElement instanceof HTMLInputElement ||
+    activeElement instanceof HTMLTextAreaElement
+  ) {
+    snapshot.selectionStart = activeElement.selectionStart;
+    snapshot.selectionEnd = activeElement.selectionEnd;
+  }
+
+  return snapshot;
+}
+
+function restoreFocusedInputState(snapshot) {
+  if (!snapshot?.id) return;
+
+  const nextElement = document.getElementById(snapshot.id);
+  const isRestorableField =
+    nextElement instanceof HTMLInputElement ||
+    nextElement instanceof HTMLTextAreaElement ||
+    nextElement instanceof HTMLSelectElement;
+
+  if (!isRestorableField || nextElement.disabled) return;
+
+  nextElement.focus();
+
+  if (
+    typeof snapshot.selectionStart !== "number" ||
+    typeof snapshot.selectionEnd !== "number" ||
+    !(
+      nextElement instanceof HTMLInputElement ||
+      nextElement instanceof HTMLTextAreaElement
+    )
+  ) {
+    return;
+  }
+
+  const max = nextElement.value.length;
+  const start = Math.min(snapshot.selectionStart, max);
+  const end = Math.min(snapshot.selectionEnd, max);
+
+  try {
+    nextElement.setSelectionRange(start, end);
+  } catch {
+    // Some input types do not support selection ranges.
+  }
 }
 
 function renderRouteContent(queryFilters, queryFilteredUrls) {
@@ -398,14 +509,17 @@ function renderTagExplorer() {
       : "";
 
   const licenseCards = LICENSES.map(
-    (license) => `
+    (license) => {
+      const count = getLicenseCount(license);
+      return `
       <a class="quick-card quick-card--license" href="${buildRoute("/list", {
         lic: license.name,
       })}">
         <span>${escapeHtml(license.name)}</span>
-        <small>${formatCount(license.count)}</small>
+        <small>${count == null ? "..." : formatCount(count)}</small>
       </a>
     `
+    }
   ).join("");
 
   const tagCards = visibleTags
@@ -574,9 +688,8 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
   }
 
   const shuffledUrls = getShuffledUrls(listFiltered, queryFilters);
-  const displayedUrls = state.listShowAll
-    ? shuffledUrls
-    : shuffledUrls.slice(0, LANDING_COUNT);
+  const visibleCount = Math.min(state.listVisibleCount, shuffledUrls.length);
+  const displayedUrls = shuffledUrls.slice(0, visibleCount);
 
   const selectedLicense = queryFilters.selectedLicense;
   const selectedLicenseData = selectedLicense
@@ -611,10 +724,12 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
     : "";
 
   const hasResults = listFiltered.length > 0;
-  const showAllButton =
-    !state.listShowAll && listFiltered.length > LANDING_COUNT
-      ? `<button class="ghost-button" data-action="show-all-list">Show all results</button>`
-      : "";
+  const hasMoreResults = visibleCount < shuffledUrls.length;
+  const listLoadControl = hasMoreResults
+    ? supportsListObserver()
+      ? `<div class="list-load-sentinel" data-role="list-load-sentinel" aria-hidden="true"></div>`
+      : `<button class="ghost-button" data-action="load-more-list">Load ${LIST_BATCH_SIZE} more</button>`
+    : "";
 
   return `
     <a href="#/" class="inline-link">← Back to discover</a>
@@ -630,7 +745,7 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
     ${renderListTagFilter()}
     ${renderListCapToggle()}
 
-    <p class="result-meta"><strong>${formatCount(listFiltered.length)}</strong> matching albums</p>
+    <p class="result-meta"><strong>${formatCount(listFiltered.length)}</strong> matching albums · showing ${formatCount(visibleCount)}</p>
 
     ${selectedLicenseDetails}
     ${favoritesAbout}
@@ -646,7 +761,7 @@ function renderAlbumList(queryFilters, queryFilteredUrls) {
         : `<p class="status status--empty">No albums match these filters.</p>`
     }
 
-    ${showAllButton}
+    ${listLoadControl}
   `;
 }
 
@@ -898,10 +1013,9 @@ function handleAppClick(event) {
     return;
   }
 
-  if (action === "show-all-list") {
+  if (action === "load-more-list") {
     event.preventDefault();
-    state.listShowAll = true;
-    render();
+    loadNextListBatch();
     return;
   }
 
@@ -931,7 +1045,7 @@ function handleAppClick(event) {
       state.listTagSuggestions = [];
       state.listTagSuggestionsVisible = false;
       state.listCache.key = "";
-      state.listShowAll = false;
+      resetListPagination();
       render();
       const input = document.getElementById("list-tag-search");
       if (input) input.focus();
@@ -947,7 +1061,7 @@ function handleAppClick(event) {
         (id) => id !== tagId
       );
       state.listCache.key = "";
-      state.listShowAll = false;
+      resetListPagination();
       render();
     }
     return;
@@ -1006,7 +1120,7 @@ function handleAppInput(event) {
     state.listTextSearchTimer = setTimeout(() => {
       state.debouncedListTextSearch = state.listTextSearch.trim();
       state.listCache.key = "";
-      state.listShowAll = false;
+      resetListPagination();
       render();
       const input = document.getElementById("list-text-search");
       if (input) input.focus();
@@ -1049,7 +1163,7 @@ function handleAppInput(event) {
   if (target.id === "list-cap-toggle") {
     state.listCapPerArtist = target.checked;
     state.listCache.key = "";
-    state.listShowAll = false;
+    resetListPagination();
     render();
   }
 }
@@ -1249,10 +1363,63 @@ function getShuffledUrls(filteredUrls, queryFilters) {
     state.listCache.key = key;
     state.listCache.shuffled = filteredUrls.slice();
     shuffleInPlace(state.listCache.shuffled);
-    state.listShowAll = false;
+    resetListPagination();
   }
 
   return state.listCache.shuffled;
+}
+
+function resetListPagination() {
+  state.listVisibleCount = LIST_BATCH_SIZE;
+}
+
+function supportsListObserver() {
+  return typeof window.IntersectionObserver === "function";
+}
+
+function getCurrentListTotal() {
+  return state.listCache.shuffled.length;
+}
+
+function loadNextListBatch() {
+  const total = getCurrentListTotal();
+  if (total === 0 || state.listVisibleCount >= total) return;
+
+  state.listVisibleCount = Math.min(
+    state.listVisibleCount + LIST_BATCH_SIZE,
+    total
+  );
+  render();
+}
+
+function teardownListObserver() {
+  if (!state.listObserver) return;
+  state.listObserver.disconnect();
+  state.listObserver = null;
+}
+
+function syncListAutoLoad() {
+  if (state.route.path !== "/list") return;
+  if (state.loadingTags !== "loaded" || state.loadingUrls !== "loaded") return;
+  if (!supportsListObserver()) return;
+  if (state.listVisibleCount >= getCurrentListTotal()) return;
+
+  const sentinel = appEl?.querySelector('[data-role="list-load-sentinel"]');
+  if (!sentinel) return;
+
+  state.listObserver = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      loadNextListBatch();
+    },
+    {
+      root: null,
+      threshold: 0,
+      rootMargin: "0px 0px 160px 0px",
+    }
+  );
+
+  state.listObserver.observe(sentinel);
 }
 
 function shuffleInPlace(list) {
@@ -1356,6 +1523,16 @@ function buildRoute(path, params) {
 
   const queryString = query.toString();
   return `#${path}${queryString ? `?${queryString}` : ""}`;
+}
+
+function getLicenseCount(license) {
+  const derivedCount = state.urlLicenseCountsById.get(license.bc_id);
+  if (Number.isFinite(derivedCount)) return derivedCount;
+
+  const generatedCount = state.licenseCountsById.get(license.bc_id);
+  if (Number.isFinite(generatedCount)) return generatedCount;
+
+  return null;
 }
 
 function formatCount(value) {

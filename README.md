@@ -22,12 +22,15 @@ No Vite, no React build step. It is a plain static app (`index.html`, `app.js`, 
 `npm start` and `npm run dev` automatically run:
 
 ```bash
+npm run generate:license-counts
 npm run version-assets
 ```
 
+`generate:license-counts` rebuilds `public/license-counts.json` from `public/urls.json` so homepage license counts stay in sync with the dataset.
+
 This stamps hash-based `?v=` query params into `index.html` for `styles.css` and `app.js` so CDN/browser caches refresh immediately when assets change.
 
-If you deploy by copying files directly (for example with `rsync` to `/var/www/...`), run `npm run version-assets` before syncing.
+If you deploy by copying files directly (for example with `rsync` to `/var/www/...`), run `npm run generate:license-counts` and `npm run version-assets` before syncing.
 
 ## Dataset sync workflow
 
@@ -42,7 +45,7 @@ npm run sync:urls
 npm run check:urls
 ```
 
-`sync:urls` downloads upstream `urls.json`, reapplies your favorites by `bc_id`, and writes `public/urls.json`.
+`sync:urls` downloads upstream `urls.json`, reapplies your favorites by `bc_id`, writes `public/urls.json`, and regenerates `public/license-counts.json`.
 
 `check:urls` validates:
 
@@ -77,6 +80,7 @@ bash scripts/deploy-live.sh --target /var/www/your-site
 ```
 
 The deploy script:
+- runs `npm run generate:license-counts`
 - runs `npm run version-assets` (unless `--skip-version-assets` is passed)
 - syncs `index.html`, `app.js`, `styles.css`, and `public/`
 - prints `urls.json` row/favorite counts after deploy

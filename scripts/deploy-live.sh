@@ -77,6 +77,8 @@ done
 echo "Deploy source: $ROOT_DIR"
 echo "Deploy target: $TARGET_DIR"
 
+run npm --prefix "$ROOT_DIR" run generate:license-counts
+
 if [[ "$SKIP_VERSION_ASSETS" -eq 0 ]]; then
   run npm --prefix "$ROOT_DIR" run version-assets
 else
