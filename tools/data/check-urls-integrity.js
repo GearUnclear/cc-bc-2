@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const ROOT_DIR = path.resolve(__dirname, "..");
+const ROOT_DIR = path.resolve(__dirname, "../..");
 const DEFAULT_URLS = path.join(ROOT_DIR, "public", "urls.json");
 const DEFAULT_FAVORITES = path.join(ROOT_DIR, "config", "favorites.bc_ids.json");
 

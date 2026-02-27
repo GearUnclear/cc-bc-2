@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const ROOT_DIR = path.resolve(__dirname, "..");
+const ROOT_DIR = path.resolve(__dirname, "../..");
 const DEFAULT_SOURCE =
   "https://raw.githubusercontent.com/handeyeco/cc-bc/refs/heads/main/public/urls.json";
 const DEFAULT_OUTPUT = path.join(ROOT_DIR, "public", "urls.json");
