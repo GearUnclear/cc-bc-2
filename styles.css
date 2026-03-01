@@ -107,6 +107,16 @@ a {
   font-size: 1.03rem;
 }
 
+.hero__source {
+  margin: 6px 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.hero__source a {
+  color: var(--accent);
+}
+
 .hero__meta {
   margin: 16px 0;
   display: inline-flex;

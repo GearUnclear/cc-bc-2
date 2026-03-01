@@ -350,6 +350,9 @@ function render() {
           <a href="#/" class="hero__logo">${BRAND.appName}</a>
           <p class="hero__byline">${BRAND.byline}</p>
           <p class="hero__subtitle">${BRAND.subtitle}</p>
+          <p class="hero__source">
+            Based on the <a href="https://github.com/handeyeco/cc-bc" target="_blank" rel="noreferrer">original dataset project</a>
+          </p>
           <p class="hero__meta">
             ${state.loadingUrls === "loaded" ? `${formatCount(state.urls.length)} albums` : "Loading albums"}
             •
